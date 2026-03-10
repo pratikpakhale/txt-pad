@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "txt.pakhale.com",
-  description: "Protected personal notepad.",
+  description: "End-to-end encrypted personal notepad.",
 };
 
 export default function RootLayout({

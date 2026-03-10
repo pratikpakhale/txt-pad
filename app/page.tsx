@@ -1,153 +1,110 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { deriveKey, decrypt } from "@/lib/crypto";
 
-const PW_KEY = "txt-pad-pw";
-
-export default function Home() {
+export default function LoginPage() {
+  const router = useRouter();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [inputPw, setInputPw] = useState("");
-  const [authed, setAuthed] = useState(false);
-  const [text, setText] = useState("");
-  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [loading, setLoading] = useState(false);
-  const [pwError, setPwError] = useState(false);
-  const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [error, setError] = useState("");
+  const [step, setStep] = useState<"idle" | "deriving">("idle");
 
-  // On mount, check if password is stored
-  useEffect(() => {
-    const stored = localStorage.getItem(PW_KEY);
-    if (stored) {
-      setPassword(stored);
-      fetchText(stored);
-    }
-  }, []);
-
-  async function fetchText(pw: string) {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/text", {
-        headers: { "x-password": pw },
-      });
-      if (res.status === 401) {
-        setPwError(true);
-        localStorage.removeItem(PW_KEY);
-        setLoading(false);
-        return;
-      }
-      const data = await res.json();
-      setText(data.text || "");
-      setAuthed(true);
-      localStorage.setItem(PW_KEY, pw);
-    } catch {
-      setStatus("error");
-    }
-    setLoading(false);
-  }
-
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setPwError(false);
-    await fetchText(inputPw);
-    setPassword(inputPw);
-  }
+    if (!username.trim() || !password) return;
+    setError("");
+    setLoading(true);
+    setStep("deriving");
 
-  function handleChange(val: string) {
-    setText(val);
-    setStatus("idle");
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => saveText(val), 800);
-  }
-
-  async function saveText(val: string) {
-    setStatus("saving");
     try {
-      const res = await fetch("/api/text", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-password": password,
-        },
-        body: JSON.stringify({ text: val }),
-      });
-      setStatus(res.ok ? "saved" : "error");
+      const key = await deriveKey(password, username.trim());
+      const res = await fetch(`/api/notes?user=${encodeURIComponent(username.trim())}`);
+      const { data } = await res.json();
+
+      if (data) {
+        // Existing user — try to decrypt
+        try {
+          await decrypt(data, key);
+        } catch {
+          setError("Wrong password. No way to recover.");
+          setLoading(false);
+          setStep("idle");
+          return;
+        }
+      }
+
+      // Store session
+      sessionStorage.setItem("txt-user", username.trim());
+      sessionStorage.setItem("txt-pw", password);
+      router.push("/editor");
     } catch {
-      setStatus("error");
+      setError("Something went wrong. Try again.");
+      setLoading(false);
+      setStep("idle");
     }
   }
 
-  function handleLogout() {
-    localStorage.removeItem(PW_KEY);
-    setAuthed(false);
-    setPassword("");
-    setInputPw("");
-    setText("");
-  }
+  return (
+    <main className="min-h-screen bg-[#0c0c0c] flex items-center justify-center px-6">
+      <div className="w-full max-w-[360px]">
+        {/* Logo */}
+        <div className="mb-10">
+          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-5">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+          </div>
+          <h1 className="text-[22px] font-semibold text-white tracking-tight">txt.pakhale.com</h1>
+          <p className="text-[13px] text-white/35 mt-1.5 leading-relaxed">
+            End-to-end encrypted notes.<br />Your password is your key — no recovery possible.
+          </p>
+        </div>
 
-  // Login screen
-  if (!authed) {
-    return (
-      <main className="min-h-screen bg-zinc-950 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm">
-          <h1 className="text-2xl font-bold text-zinc-100 mb-1">📝 txt.pakhale.com</h1>
-          <p className="text-zinc-500 text-sm mb-6">Enter your password to access your notes.</p>
-          <form onSubmit={handleLogin} className="flex flex-col gap-3">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              autoFocus
+              className="w-full bg-white/[0.06] border border-white/[0.08] rounded-xl px-4 py-3 text-[14px] text-white placeholder:text-white/25 focus:outline-none focus:border-white/20 focus:bg-white/[0.08] transition-all"
+            />
             <input
               type="password"
-              className={`w-full bg-zinc-900 border rounded-lg px-4 py-3 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-600 ${pwError ? "border-red-600" : "border-zinc-800"}`}
               placeholder="Password"
-              value={inputPw}
-              onChange={(e) => setInputPw(e.target.value)}
-              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              className="w-full bg-white/[0.06] border border-white/[0.08] rounded-xl px-4 py-3 text-[14px] text-white placeholder:text-white/25 focus:outline-none focus:border-white/20 focus:bg-white/[0.08] transition-all"
             />
-            {pwError && <p className="text-red-400 text-sm">Wrong password.</p>}
-            <button
-              type="submit"
-              disabled={loading || !inputPw}
-              className="bg-zinc-100 text-zinc-900 font-semibold rounded-lg py-3 hover:bg-white transition-colors disabled:opacity-40"
-            >
-              {loading ? "Checking..." : "Unlock"}
-            </button>
-          </form>
-        </div>
-      </main>
-    );
-  }
-
-  // Editor
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center px-4 py-10">
-      <div className="w-full max-w-3xl flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">📝 txt.pakhale.com</h1>
-            <p className="text-zinc-500 text-sm mt-0.5">Synced via Vercel Blob.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-xs px-2 py-1 rounded-full font-medium transition-all ${
-              status === "saved" ? "bg-green-900 text-green-300" :
-              status === "saving" ? "bg-yellow-900 text-yellow-300" :
-              status === "error" ? "bg-red-900 text-red-300" :
-              "bg-zinc-800 text-zinc-400"
-            }`}>
-              {status === "saved" ? "✓ Saved" : status === "saving" ? "Saving…" : status === "error" ? "Error" : "Unsaved"}
-            </span>
-            <button
-              onClick={handleLogout}
-              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 transition-colors"
-            >
-              Lock
-            </button>
-          </div>
-        </div>
 
-        <textarea
-          className="w-full min-h-[75vh] bg-zinc-900 border border-zinc-800 rounded-xl p-5 text-base leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-zinc-600 placeholder:text-zinc-600 font-mono"
-          placeholder="Start typing… notes auto-save to Vercel Blob."
-          value={text}
-          onChange={(e) => handleChange(e.target.value)}
-          autoFocus
-        />
+          {error && (
+            <p className="text-[13px] text-red-400/80 px-1">{error}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !username.trim() || !password}
+            className="mt-1 w-full bg-white text-[#0c0c0c] rounded-xl py-3 text-[14px] font-semibold hover:bg-white/90 transition-all disabled:opacity-25 disabled:cursor-not-allowed"
+          >
+            {loading
+              ? step === "deriving"
+                ? "Deriving key…"
+                : "Unlocking…"
+              : "Continue →"}
+          </button>
+        </form>
+
+        <p className="text-[12px] text-white/20 text-center mt-8 leading-relaxed">
+          New user? Just enter a username and password.<br />
+          No account creation needed.
+        </p>
       </div>
     </main>
   );
