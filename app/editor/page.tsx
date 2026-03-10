@@ -12,6 +12,10 @@ export default function EditorPage() {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [loading, setLoading] = useState(true);
   const [wordCount, setWordCount] = useState(0);
+  const [showDestroy, setShowDestroy] = useState(false);
+  const [destroyPw, setDestroyPw] = useState("");
+  const [destroyError, setDestroyError] = useState("");
+  const [destroying, setDestroying] = useState(false);
   const keyRef = useRef<CryptoKey | null>(null);
   const userRef = useRef<string>("");
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,6 +87,43 @@ export default function EditorPage() {
     router.replace("/");
   }
 
+  async function handleDestroy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!destroyPw) return;
+    setDestroyError("");
+    setDestroying(true);
+
+    try {
+      // Re-derive key and verify password by decrypting existing notes
+      const testKey = await deriveKey(destroyPw, userRef.current);
+      const res = await fetch(`/api/notes?user=${encodeURIComponent(userRef.current)}`);
+      const { data } = await res.json();
+
+      if (data) {
+        try {
+          await decrypt(data, testKey);
+        } catch {
+          setDestroyError("Wrong password.");
+          setDestroying(false);
+          return;
+        }
+      }
+
+      // Password verified — delete the blob
+      await fetch("/api/notes", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: userRef.current }),
+      });
+
+      sessionStorage.clear();
+      router.replace("/");
+    } catch {
+      setDestroyError("Something went wrong.");
+      setDestroying(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-[#0c0c0c] flex items-center justify-center">
@@ -149,7 +190,65 @@ export default function EditorPage() {
         <p className="text-[11px] text-white/15 tracking-wide">
           AES-256-GCM · encrypted in your browser · server sees nothing
         </p>
+        <button
+          onClick={() => { setShowDestroy(true); setDestroyPw(""); setDestroyError(""); }}
+          className="mt-3 text-[11px] text-red-900 hover:text-red-500 transition-colors"
+        >
+          Destroy account
+        </button>
       </footer>
+
+      {/* Destroy modal */}
+      {showDestroy && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center px-6 z-50">
+          <div className="w-full max-w-[340px] bg-[#111] border border-white/[0.08] rounded-2xl p-6">
+            <div className="mb-5">
+              <p className="text-[13px] font-semibold text-red-400 mb-1">Destroy account</p>
+              <p className="text-[13px] text-white/40 leading-relaxed">
+                This will permanently delete all your notes and remove your account.
+                There is absolutely no recovery.
+              </p>
+            </div>
+
+            <form onSubmit={handleDestroy} className="flex flex-col gap-3">
+              <div className="bg-white/[0.04] border border-white/[0.06] rounded-xl px-4 py-2.5">
+                <p className="text-[11px] text-white/30 mb-0.5">Logged in as</p>
+                <p className="text-[13px] text-white/70 font-mono">{userRef.current}</p>
+              </div>
+
+              <input
+                type="password"
+                placeholder="Enter your password to confirm"
+                value={destroyPw}
+                onChange={(e) => setDestroyPw(e.target.value)}
+                autoFocus
+                className="w-full bg-white/[0.06] border border-white/[0.08] rounded-xl px-4 py-3 text-[14px] text-white placeholder:text-white/25 focus:outline-none focus:border-red-900 transition-all"
+              />
+
+              {destroyError && (
+                <p className="text-[13px] text-red-400/80 px-1">{destroyError}</p>
+              )}
+
+              <div className="flex gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDestroy(false)}
+                  className="flex-1 py-2.5 rounded-xl text-[13px] text-white/40 hover:text-white/60 bg-white/[0.05] hover:bg-white/[0.08] transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={destroying || !destroyPw}
+                  className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold text-red-400 bg-red-950/60 hover:bg-red-950 border border-red-900/40 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {destroying ? "Destroying…" : "Destroy forever"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -42,3 +42,17 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(req: NextRequest) {
+  const { user } = await req.json();
+  if (!user) return NextResponse.json({ error: "Missing user" }, { status: 400 });
+
+  const key = `notes/${slugify(user)}.enc`;
+  try {
+    const { blobs } = await list({ prefix: key });
+    if (blobs.length) await del(blobs.map((b) => b.url));
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
+  }
+}
